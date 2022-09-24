@@ -96,7 +96,7 @@ def test_MOSSE_tracker(video_path, ground_truth_path, learning_rate=0.125):
 				if psr > 8:
 					tracker.tracking = True
 
-		# If ground truth data does not exist beyond the current index frame, break
+		# If ground truth data does not exist beyond the current frame_count frame, break
 		if frame_count >= len(gt_x):
 			break
 
