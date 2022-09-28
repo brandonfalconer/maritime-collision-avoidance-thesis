@@ -32,7 +32,7 @@ def test_MOSSE_tracker(video_path, ground_truth_path, learning_rate=0.125):
 
 	print("Selected multiple objects with initial bounding boxes: {}".format(gt_bounding_boxes))
 
-	# Initialize MOSSE tracker
+	# Initialize Tracker tracker
 	curr_id = 1
 	for bbox in gt_bounding_boxes:
 		# Append the tracker
@@ -91,7 +91,7 @@ def test_MOSSE_tracker(video_path, ground_truth_path, learning_rate=0.125):
 
 				(x, y), (w, h) = tracker.pos, tracker.size
 				tracker.last_img = img = cv2.getRectSubPix(frame_gray, (w, h), (x, y))
-				img = tracker._preprocess(img)
+				img = tracker.preprocess(img)
 				_, _, psr = tracker.correlate(img)
 				if psr > 8:
 					tracker.tracking = True
@@ -139,7 +139,7 @@ def test_MOSSE_tracker(video_path, ground_truth_path, learning_rate=0.125):
 	fps = frame_count / elapsed
 
 	averageIoU = totalIoU / IoUCount
-	print("Tracker Type: MOSSE \nAverage IoU: " + str(averageIoU))
+	print("Tracker Type: Tracker \nAverage IoU: " + str(averageIoU))
 	print("Elapsed Time: " + str(elapsed))
 	print("FPS: " + str(fps) + "\n")
 
@@ -147,7 +147,7 @@ def test_MOSSE_tracker(video_path, ground_truth_path, learning_rate=0.125):
 
 
 def test_learning_rate():
-	# Tests using internal MOSSE tracker
+	# Tests using internal Tracker tracker
 	lr_to_test = [0.01, 0.075, 0.125, 0.175, 0.3]
 
 	for i in range(len(lr_to_test)):

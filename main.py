@@ -12,6 +12,8 @@ from PIL import Image
 import glob
 import matplotlib.pyplot as plt
 
+from Object_Tracking.multiple_object_tracker import MOT
+
 video_path = "Data/MVI_1469_VIS.avi"
 
 # Classes
@@ -41,20 +43,7 @@ def categorical_to_mask(im):
 	return mask
 
 
-def load_files(path, target_size, scale_factor):
-	image_list = []
-	filenames = glob.glob(path)
-	filenames.sort()
-	for filename in filenames:
-		im = Image.open(filename)
-		w, h = im.size
-		im = im.resize((target_size, target_size))
-		im = np.asarray(im) / scale_factor
-		image_list.append(im)
-	return np.asarray(image_list)
-
-
-def run_model(results=False):
+def run_model(output_results=False, run_detection=True, run_semantic=True):
 	# Create a video capture object to read videos
 	capture = cv2.VideoCapture(video_path)
 
@@ -87,48 +76,69 @@ def run_model(results=False):
 			break
 
 		# Convert the captured frame into RGB
-		rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+		rgb_frame = cv2.cvtColor(frame.copy(), cv2.COLOR_BGR2RGB)
 
-		# Object Detection
-		if frame_count % 5 == 0 or frame_count == 0:
-			# Detection runs every 5 frames
-			results = object_detection_model(rgb_frame.copy())
-			print("Frame:" + str(frame_count))
-			print("Number of objects: " + str(len(results.pandas().xyxy[0])))
+		""" Object Detection and Object Tracking"""
+		if run_detection:
+			detection_bounding_boxes = []
 
-			if results:
-				fig, ax = plt.subplots(figsize=(16, 12))
-				ax.imshow(results.render()[0])
-				plt.savefig("Results/detection_output.png")
+			# Initialise tracker handler
+			if frame_count == 0:
+				detection_results = object_detection_model(rgb_frame.copy())
+				dfResults = detection_results.pandas().xyxy[0]
 
-		# Semantic Segmentation
-		if frame_count % 5 == 0 or frame_count == 0:
-			# Segmentation runs every 5 frames
+				for index, row in dfResults.iterrows():
+					detection_bounding_boxes.append(
+						(int(row['xmin']), int(row['ymin']), int(row['xmax']), int(row['ymax'])))
 
-			# Convert the captured frame into RGB
-			semantic_frame = Image.fromarray(rgb_frame.copy(), 'RGB')
+				tracker_handler = MOT(frame, detection_bounding_boxes, 0.125)
 
-			# Resizing into dimensions you used while training
-			semantic_frame = semantic_frame.resize((128, 128))
-			semantic_img_array = np.array(semantic_frame)
+			if frame_count % 20 == 0:
+				# Detection runs every 5 frames
+				detection_results = object_detection_model(rgb_frame.copy())
+				dfResults = detection_results.pandas().xyxy[0]
 
-			# Expand dimensions to match the 4D Tensor shape.
-			semantic_img_array = np.expand_dims(semantic_img_array, axis=0)
+				for index, row in dfResults.iterrows():
+					detection_bounding_boxes.append(
+						(int(row['xmin']), int(row['ymin']), int(row['xmax']), int(row['ymax'])))
 
-			predict = semantic_segmentation_model.predict(semantic_img_array)
-			output = categorical_to_mask(predict[0, :, :, :])
+				tracker_handler.update_tracker_list(detection_bounding_boxes)
 
-			if results:
-				semantic_plot = plt.imshow(output)
-				semantic_frame.save("Results/semantic_input.jpg")
-				plt.savefig("Results/semantics_output.png")
+			# Draw detections as blue bb
+			for index, row in dfResults.iterrows():
+				cv2.rectangle(frame, pt1=(int(row['xmin']), int(row['ymin'])), pt2=(int(row['xmax']), int(row['ymax'])), color=(255, 0, 0), thickness=2)
 
-		# Object Tracking TODO
+				if output_results:
+					fig, ax = plt.subplots(figsize=(16, 12))
+					ax.imshow(detection_results.render()[0])
+					plt.savefig("Results/detection_output.png")
 
-		# Show results
-		dfResults = results.pandas().xyxy[0]
-		for index, row in dfResults.iterrows():
-			cv2.rectangle(frame, pt1=(int(row['xmin']), int(row['ymin'])), pt2=(int(row['xmax']), int(row['ymax'])), color=(255, 0, 0), thickness=2)
+
+
+			tracker_handler.update_trackers(frame)
+
+		"""Semantic Segmentation"""
+		if run_semantic:
+			if frame_count % 5 == 0:
+				# Segmentation runs every 5 frames
+
+				# Convert the captured frame into RGB
+				semantic_frame = Image.fromarray(rgb_frame.copy(), 'RGB')
+
+				# Resizing into dimensions you used while training
+				semantic_frame = semantic_frame.resize((128, 128))
+				semantic_img_array = np.array(semantic_frame)
+
+				# Expand dimensions to match the 4D Tensor shape.
+				semantic_img_array = np.expand_dims(semantic_img_array, axis=0)
+
+				predict = semantic_segmentation_model.predict(semantic_img_array)
+				output = categorical_to_mask(predict[0, :, :, :])
+
+				if output_results:
+					plt.imshow(output)
+					semantic_frame.save("Results/semantic_input.jpg")
+					plt.savefig("Results/semantics_output.png")
 
 		# Draw FPS
 		end = time.time()
@@ -153,5 +163,5 @@ def run_model(results=False):
 
 
 if __name__ == '__main__':
-	# Set results to true, to save files of detection/segmentation output
-	run_model(False)
+	# Set output_results to true, to save files of detection/segmentation output
+	run_model(output_results=False, run_detection=True, run_semantic=False)
