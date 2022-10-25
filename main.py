@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import math
 from Object_Tracking.multiple_object_tracker import MOT
 
-video_path = "Data/video.avi"
+video_path = "Data/video1.avi"
 
 # Set whether to use both environment & Other classes for anomaly detection (more likely to detect anomalies but has more noise)
 useBothSemanticClasses = True
