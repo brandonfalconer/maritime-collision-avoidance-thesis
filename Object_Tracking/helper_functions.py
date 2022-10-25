@@ -7,22 +7,71 @@ import scipy.io as sio
 import numpy as np
 
 
+# Common metric functions
 def intersection_over_union(boxA, boxB):
+	"""
+	Intersection over union (IoU) can be between 0 and 1, with 0 being no intersection and 1 a perfect match)
+	"""
 	# determine the (x, y)-coordinates of the intersection rectangle
 	xA = max(boxA[0], boxB[0])
 	yA = max(boxA[1], boxB[1])
 	xB = min(boxA[2], boxB[2])
 	yB = min(boxA[3], boxB[3])
 
-	# area of intersection rectangle
+	# Area of inside intersection rectangle
 	interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
 
-	boxAArea = (boxA[2] - boxA[0] + 1) * (boxA[3] - boxA[1] + 1)
-	boxBArea = (boxB[2] - boxB[0] + 1) * (boxB[3] - boxB[1] + 1)
-
-	return interArea / float(boxAArea + boxBArea - interArea)
+	return interArea / float(bbox_area(boxA) + bbox_area(boxB) - interArea)
 
 
+def bbox_area(box):
+	return(box[2] - box[0] + 1) * (box[3] - box[1] + 1)
+
+
+def get_bbox_points(x, y, width, height):
+	gt_p1 = (x, y)
+	gt_p2 = (x + width, y + height)
+
+	return gt_p1, gt_p2
+
+
+def get_bbox_points_from_middle(pos, size):
+	# Retrieve lower left and upper right (x,y) points with middle point and size
+	p1, p2 = (int(pos[0] - 0.5 * size[0]), int(pos[1] - 0.5 * size[1])), (int(pos[0] + 0.5 * size[0]), int(pos[1] + 0.5 * size[1]))
+	return p1, p2
+
+
+def squared_euclidean_distance(boxA, boxB):
+	# determine the (x, y)-coordinates of the intersection rectangle
+	x1, x2, y1, y2 = boxA[0], boxA[1], boxB[0], boxB[1]
+
+	return (x1 - x2)**2 + (y1 - y2)**2
+
+
+def get_percent_diff(a, b):
+	return (abs(a - b) / ((a + b) / 2))
+
+
+def get_MOTA(total_groundtruths, misses, false_positives, mismatches):
+	mota = 0.0
+	if total_groundtruths == 0:
+		print("Warning", "No ground truth. MOTA calculation not possible")
+	else:
+		mota = 1.0 - float(misses + false_positives + mismatches) / float(total_groundtruths)
+
+	return mota
+
+
+def get_MOTP(total_correspondences, total_overlap):
+	motp = 0.0
+	if total_correspondences == 0:
+		print("Warning", "No correspondences found. MOTP calculation not possible")
+	else:
+		motp = total_overlap / total_correspondences
+	return motp
+
+
+# Load GT data functions
 def load_data_GT_Track(video_path, ground_truth_path):
 	"""
 	Loads data with an object tracking based ground truth

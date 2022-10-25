@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import math
 from Object_Tracking.multiple_object_tracker import MOT
 
-video_path = "Data/video1.avi"
+video_path = "Data/MVI_1469_VIS.avi"
 
 # Set whether to use both environment & Other classes for anomaly detection (more likely to detect anomalies but has more noise)
 useBothSemanticClasses = True
@@ -70,6 +70,9 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 	# Load models
 	object_detection_model = torch.hub.load('ultralytics/yolov5', 'custom', path="Object_Detection\\Model-New\\best.pt",
 											force_reload=True)
+	object_detection_model.conf = 0.5
+	object_detection_model.iou = 0.5
+
 	semantic_segmentation_model = tf.keras.models.load_model('Semantic_Segmentation/Model-New', compile=False)
 
 	# Initialise starting time for average FPS
@@ -99,8 +102,8 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 
 				tracker_handler = MOT(frame, detection_bounding_boxes, 0.125)
 
-			if frame_count % 20 == 0:
-				# Detection runs every 5 frames
+			if frame_count % 60 == 0:
+				# Detection runs every 2 seconds
 				detection_results = object_detection_model(rgb_frame.copy())
 				dfResults = detection_results.pandas().xyxy[0]
 
@@ -127,7 +130,7 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 
 		"""Semantic Segmentation"""
 		if run_semantic:
-			if frame_count % 5 == 0:
+			if frame_count % 60 == 0:
 				# Segmentation runs every 5 frames
 
 				# Convert the captured frame into RGB

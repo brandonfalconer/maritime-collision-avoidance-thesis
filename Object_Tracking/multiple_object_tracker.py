@@ -1,13 +1,13 @@
-import sys
-import time
+import itertools
+
 import cv2
-import random
 import Object_Tracking.helper_functions as hp
 
 # Constants
-from Object_Tracking.Model.MOSSE_Kalman_filter import Tracker
+from Object_Tracking.Trackers.MOSSE_filter import MOSSE
 
 IOU_THRESHOLD = 0.5
+
 
 class MOT:
 	def __init__(self, frame, object_detections, learning_rate):
@@ -22,55 +22,50 @@ class MOT:
 		frame_gray = cv2.cvtColor(self.frame, cv2.COLOR_BGR2GRAY)
 
 		if len(self.trackers) == 0:
-			print("Original detections")
-			print(detection_bounding_boxes)
 			for detection_bounding_box in detection_bounding_boxes:
-				self.trackers.append(Tracker(self.currentId, frame_gray, detection_bounding_box, learning_rate=self.learning_rate))
+				self.trackers.append(MOSSE(self.currentId, frame_gray, detection_bounding_box, learning_rate=self.learning_rate))
 				self.currentId += 1
 		else:
-			print("New detections")
-			print(detection_bounding_boxes)
 			trackers_matched = set()
 			detections_to_remove = []
-			trackers = self.trackers.copy()
+			trackers = self.trackers
 
-			print(len(detection_bounding_boxes))
-			index = 0
+			# Determine if there are multiple detections for one object
+			for detection_a, detection_b in itertools.combinations(detection_bounding_boxes, 2):
+				IoU = hp.intersection_over_union(detection_a, detection_b)
+				if IoU > 0.5:
+					# Determine if the bounding boxes are of similar width and height
+					da_x1, da_y1, da_x2, da_y2 = detection_a
+					da_w, da_h = da_x2 - da_x1, da_y2 - da_y1
+
+					db_x1, db_y1, db_x2, db_y2 = detection_b
+					db_w, db_h = db_x2 - db_x1, db_y2 - db_y1
+
+					percent_diff_width = hp.get_percent_diff(da_w, db_w)
+					percent_diff_height = hp.get_percent_diff(da_h, db_h)
+
+					if percent_diff_width < .2 and percent_diff_height < .2:
+						detection_bounding_boxes.remove(detection_a)
+						break
+
 			for detection_bounding_box in detection_bounding_boxes:
-				print("INDEX: " + str(index))
 				for tracker in trackers:
-
 					(x, y), (w, h) = tracker.pos, tracker.size
 					tracker_bounding_box = int(x - 0.5 * w), int(y - 0.5 * h), int(x + 0.5 * w), int(y + 0.5 * h)
 
 					IoU = hp.intersection_over_union(detection_bounding_box, tracker_bounding_box)
-					print("Tracker ID: " + str(tracker.id) + " Detect BB: " + str(detection_bounding_box) + " Track BB: " + str(tracker_bounding_box) + ", IoU: " + str(IoU))
 
 					if IoU > IOU_THRESHOLD:
-						print("Tracker match with ID: " + str(tracker.id))
 						# Found a match, check if already found
 						if tracker in trackers_matched:
 							break
 
 						# Update tracker position to detected position, and add to set
-						d_x1, d_y1, d_x2, d_y2 = detection_bounding_box
-						d_w, d_h = d_x2 - d_x1, d_y2 - d_y1
-
-						print(detection_bounding_box)
-
-						"""
-						tracker.pos = d_x1 + 0.5 * (d_w - 1), d_y1 + 0.5 * (d_h - 1)
-						tracker.size = d_w, d_h
-						tracker.win = cv2.createHanningWindow((d_w, d_h), cv2.CV_32F)
-						tracker.last_img = cv2.getRectSubPix(self.frame, (w, h), tracker.pos)
-						"""
-
+						if IoU < 0.5:
+							tracker.update_filter(frame_gray, detection_bounding_box)
 						trackers_matched.add(tracker)
 						detections_to_remove.append(detection_bounding_box)
-						#detection_bounding_boxes.pop(index)
-						#trackers.remove(tracker)
 						break
-				index += 1
 
 			# Remove detections with matches
 			for detection_to_remove in detections_to_remove:
@@ -83,12 +78,32 @@ class MOT:
 					self.trackers.remove(tracker)
 
 			# Create new trackers for those detections with no tracker match
-			print("UPDATING")
-			print(detection_bounding_boxes)
 			for detection_bounding_box in detection_bounding_boxes:
-				self.trackers.append(Tracker(self.currentId, frame_gray, detection_bounding_box, learning_rate=self.learning_rate))
+				self.trackers.append(MOSSE(self.currentId, frame_gray, detection_bounding_box, learning_rate=self.learning_rate))
 				self.currentId += 1
 
+			# Determine if there are multiple trackers for one object
+			for tracker_a, tracker_b in itertools.combinations(self.trackers, 2):
+				(x, y), (w, h) = tracker_a.pos, tracker_a.size
+				tracker_a_bounding_box = int(x - 0.5 * w), int(y - 0.5 * h), int(x + 0.5 * w), int(y + 0.5 * h)
+
+				(x, y), (w, h) = tracker_b.pos, tracker_b.size
+				tracker_b_bounding_box = int(x - 0.5 * w), int(y - 0.5 * h), int(x + 0.5 * w), int(y + 0.5 * h)
+
+				IoU = hp.intersection_over_union(tracker_a_bounding_box, tracker_b_bounding_box)
+
+				if IoU > 0.5:
+					# Determine if the bounding boxes are of similar width and height
+					percent_diff_width = hp.get_percent_diff(tracker_a.size[0], tracker_b.size[0])
+					percent_diff_height = hp.get_percent_diff(tracker_a.size[1], tracker_b.size[1])
+
+					if percent_diff_width < .2 and percent_diff_height < .2:
+						# So dumb right here
+						if tracker_a.id > tracker_b.id:
+							self.trackers.remove(tracker_a)
+						else:
+							self.trackers.remove(tracker_b)
+						break
 
 	def update_trackers(self, frame):
 		# Get updated location of objects in subsequent frames
@@ -96,22 +111,29 @@ class MOT:
 		for tracker in self.trackers:
 			# Determine if tracker has lost the track
 			if tracker.tracking:
-				# Update tracker appearance filter and motion model
+				tracker.untracked = 0
 				tracker.update_appearance(frame_gray)
 				tracker.update_motion(tracker.pos)
-
-				# Draw tracker to frame
-				tracker.draw_state(frame)
 			else:
+				# If track has been lost for too long, delete tracker
+				if tracker.untracked > tracker.untracked_threshold:
+					del tracker
+					continue
 
-				# Appearance filter has failed, continue to check the region for correlations in-case of occlusion
-				print("Stopped tracking: " + str(tracker.id))
-
+				# Update motion model of tracker based on predicted position
 				tracker.update_motion(tracker.predicted_pos)
+				(x, y), (w, h) = tracker.predicted_pos, tracker.size
+				(x, y) = (int(x), int(y))
 
-				(x, y), (w, h) = tracker.pos, tracker.size
-				tracker.last_img = img = cv2.getRectSubPix(frame_gray, (w, h), (x, y))
+				# Check area of expected motion (occlusion)
+				img = cv2.getRectSubPix(frame_gray, (w, h), (x, y))
 				img = tracker.preprocess(img)
-				_, _, psr = tracker.correlate(img)
-				if psr > 8:
+				_, _, tracker.psr = tracker.correlate(img)
+
+				# Found object from motion estimate, keep tracking with appearance
+				if tracker.psr > tracker.psr_threshold:
+					tracker.pos = (x, y)
+					tracker.update_appearance(frame_gray)
 					tracker.tracking = True
+
+			tracker.draw_state(frame, combine_tracks=True)
