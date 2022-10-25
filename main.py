@@ -11,10 +11,16 @@ import tensorflow as tf
 from PIL import Image
 import glob
 import matplotlib.pyplot as plt
-
+import math
 from Object_Tracking.multiple_object_tracker import MOT
 
-video_path = "Data/MVI_1469_VIS.avi"
+video_path = "Data/video.avi"
+
+# Set whether to use both environment & Other classes for anomaly detection (more likely to detect anomalies but has more noise)
+useBothSemanticClasses = True
+
+# Set whether to output Semantic results on main frame, if false, will just open new smaller visuals 
+displaySemanticIntegrated = True
 
 # Classes
 names = {
@@ -62,9 +68,9 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 	tf.get_logger().setLevel('INFO')
 
 	# Load models
-	object_detection_model = torch.hub.load('ultralytics/yolov5', 'custom', path="Object_Detection\Model\smd1_best.pt",
+	object_detection_model = torch.hub.load('ultralytics/yolov5', 'custom', path="Object_Detection\\Model-New\\best.pt",
 											force_reload=True)
-	semantic_segmentation_model = tf.keras.models.load_model('Semantic_Segmentation/Model', compile=False)
+	semantic_segmentation_model = tf.keras.models.load_model('Semantic_Segmentation/Model-New', compile=False)
 
 	# Initialise starting time for average FPS
 	start = time.time()
@@ -109,9 +115,11 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 				cv2.rectangle(frame, pt1=(int(row['xmin']), int(row['ymin'])), pt2=(int(row['xmax']), int(row['ymax'])), color=(255, 0, 0), thickness=2)
 
 				if output_results:
+					
 					fig, ax = plt.subplots(figsize=(16, 12))
 					ax.imshow(detection_results.render()[0])
 					plt.savefig("Results/detection_output.png")
+					plt.close()
 
 
 
@@ -126,19 +134,116 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 				semantic_frame = Image.fromarray(rgb_frame.copy(), 'RGB')
 
 				# Resizing into dimensions you used while training
-				semantic_frame = semantic_frame.resize((128, 128))
+				semantic_frame = semantic_frame.resize((480, 480))
 				semantic_img_array = np.array(semantic_frame)
+
+				# Save the input to view later
+				semantic_frame_input = cv2.cvtColor(semantic_img_array.copy(), cv2.COLOR_RGB2BGR)
 
 				# Expand dimensions to match the 4D Tensor shape.
 				semantic_img_array = np.expand_dims(semantic_img_array, axis=0)
+				
+				# Run input image through model
+				semantic_predict = semantic_segmentation_model.predict(semantic_img_array)
+				semantic_predict = semantic_predict[0]
 
-				predict = semantic_segmentation_model.predict(semantic_img_array)
-				output = categorical_to_mask(predict[0, :, :, :])
+				if (displaySemanticIntegrated):
+					semantic_predict = cv2.resize(semantic_predict, (np.shape(frame)[1], np.shape(frame)[0]))
+					outputX = np.shape(frame)[1]
+					outputY = np.shape(frame)[0]
+				else:
+					outputX = 480
+					outputY = 480
+
+				# Output the mask
+				semantic_output = categorical_to_mask(semantic_predict)
+
+				# Turn into integer classes for easier use
+				semantic_output = np.round(semantic_output, 3)
+				semantic_output[(semantic_output == 0)] = 0
+				semantic_output[(semantic_output == 0.004)] = 1
+				semantic_output[(semantic_output == 0.008)] = 2
+				semantic_output[(semantic_output == 0.012)] = 3
+
+				if run_detection:
+				
+					# create binary mask to determine if theres an object there or not
+					if (displaySemanticIntegrated):
+						detectionMask = np.zeros((np.shape(frame)[0], np.shape(frame)[1]))
+					else:
+						detectionMask = np.zeros((480,480))
+
+					for index, row in dfResults.iterrows():
+
+						# Define scale to get detections in terms of 480x480 frame if needed
+						if (displaySemanticIntegrated):
+							xScale = 1
+							yScale = 1
+						else:
+							xScale = np.shape(frame)[1] / 480
+							yScale = np.shape(frame)[0] / 480
+
+						# Define the edges of the detections boxes
+						xMin = math.floor(row['xmin']/xScale - 10)
+						xMax = math.ceil(row['xmax']/xScale + 10)
+						yMin = math.floor(row['ymin']/yScale - 10)
+						yMax = math.ceil(row['ymax']/yScale + 10)
+
+						# Make sure none of the edges are off map
+						if (xMin < 0):
+							xMin = 0
+						if (xMax > outputX):
+							xMax = outputX
+
+						if (yMin < 0):
+							yMin = 0
+						if (yMax > outputY):
+							yMax = outputY
+
+						# Fill detection Mask with 1s where objects are
+						detectionMask[yMin : yMax, xMin : xMax ] = 1 
+
+				# create semantic mask of objects, ignoring those found by the object detection
+				if (displaySemanticIntegrated):
+					semanticMask = np.zeros((np.shape(frame)[0], np.shape(frame)[1]))
+					print(np.shape(frame))
+				else: 
+					semanticMask = np.zeros((480,480))
+
+				# Put the semantic outputs onto the mask depending on the global setting
+				if (useBothSemanticClasses):
+					semanticMask[(semantic_output == 0) | (semantic_output == 3)]  = 1
+				else:
+					semanticMask[(semantic_output == 0)] = 1
+				
+				# Remove any overlap from the object detection 
+				semanticMask[(detectionMask == 1)] = 0
+
+				if (not displaySemanticIntegrated):
+					# Add Semantic Overlay to image
+					semanticFrameOverlay = frame.copy()
+					semanticFrameOverlay = cv2.resize(semanticFrameOverlay, (480, 480))
+
+					# apply the mask to the image, and turning any anomalies to yellow
+					semanticFrameOverlay[semanticMask == 1] = [0, 255, 255]
+
+					semanticFrameOverlayAll = semanticFrameOverlay.copy()
+
+					# View full output from semantic segmentation models objets/anomalies as yellow overlay
+					if (useBothSemanticClasses):
+						semanticFrameOverlayAll[((semantic_output == 0) | (semantic_output == 3))] = [0, 255, 255]
+					else:
+						semanticFrameOverlayAll[((semantic_output == 0))] = [0, 255, 255]
+
+					# Show frame
+					cv2.imshow('Integration_Test_Semantic_Anomalies', semanticFrameOverlay)
+					cv2.imshow('Integration_Test_Semantic', semanticFrameOverlayAll)
 
 				if output_results:
-					plt.imshow(output)
-					semantic_frame.save("Results/semantic_input.jpg")
+					plt.imshow(semantic_output)
+					cv2.imwrite("Results/semantic_input.jpg", semantic_frame_input)
 					plt.savefig("Results/semantics_output.png")
+					plt.close()
 
 		# Draw FPS
 		end = time.time()
@@ -146,7 +251,10 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 		fps = frame_count / elapsed
 		draw_str(frame, (100, 100), 'FPS: %.2f' % fps)
 
-		# Show frame
+		# Add Semantic Output to mask if its fully integrated
+		if (displaySemanticIntegrated):
+			frame[(semanticMask == 1)] = [0, 255, 255]
+
 		cv2.imshow('Integration_Test', frame)
 
 		frame_count += 1
@@ -164,4 +272,4 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 
 if __name__ == '__main__':
 	# Set output_results to true, to save files of detection/segmentation output
-	run_model(output_results=False, run_detection=True, run_semantic=False)
+	run_model(output_results=False, run_detection=True, run_semantic=True)
