@@ -63,7 +63,7 @@ def draw_str(dst, target, s):
 
 
 class MOSSE:
-	def __init__(self, id, frame, rect, psr_threshold=8, untracked_threshold=150, learning_rate=0.125, sigma=2):
+	def __init__(self, id, frame, rect, psr_threshold=12, untracked_threshold=150, learning_rate=0.125, sigma=2):
 		"""
 		Initialise the MOSSE tracker
 		with a specified rectangle over the object in which to track
@@ -89,6 +89,7 @@ class MOSSE:
 
 		self.tracking = True
 		self.untracked = 0
+		self.undetected = 0
 		self.predicted_pos = (0, 0)
 
 		# Dict temp for testing metrics
@@ -154,12 +155,7 @@ class MOSSE:
 		self.average_psr = self.total_psr / self.update_count
 		self.tracking = self.psr > self.psr_threshold
 
-		if self.tracking:
-			if self.psr < self.average_psr / 4:
-				self.tracking = False
-				return
-			pass
-		elif not self.tracking:
+		if not self.tracking:
 			return
 
 		self.pos = x + dx, y + dy
@@ -277,6 +273,7 @@ class MOSSE:
 			(x, y), (w, h) = self.pos, self.size
 		else:
 			(x, y), (w, h) = self.predicted_pos, self.size
+
 		x1, y1, x2, y2 = int(x - 0.5 * w), int(y - 0.5 * h), int(x + 0.5 * w), int(y + 0.5 * h)
 
 		# Draw string self ID

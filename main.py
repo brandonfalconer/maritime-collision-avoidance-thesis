@@ -70,13 +70,16 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 	# Load models
 	object_detection_model = torch.hub.load('ultralytics/yolov5', 'custom', path="Object_Detection\\Model-New\\best.pt",
 											force_reload=True)
-	object_detection_model.conf = 0.5
+	object_detection_model.conf = 0.8
 	object_detection_model.iou = 0.5
 
 	semantic_segmentation_model = tf.keras.models.load_model('Semantic_Segmentation/Model-New', compile=False)
 
 	# Initialise starting time for average FPS
 	start = time.time()
+
+	# Show object detection frame
+	show_frame = 0
 
 	# Process video
 	while capture.isOpened():
@@ -113,20 +116,25 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 
 				tracker_handler.update_tracker_list(detection_bounding_boxes)
 
+			tracker_handler.update_trackers(frame)
+
 			# Draw detections as blue bb
+			# Show for 3 frames
+			if frame_count % 60 == 0:
+				show_frame = 5
+
 			for index, row in dfResults.iterrows():
-				cv2.rectangle(frame, pt1=(int(row['xmin']), int(row['ymin'])), pt2=(int(row['xmax']), int(row['ymax'])), color=(255, 0, 0), thickness=2)
+				if show_frame > 0:
+					cv2.rectangle(frame, pt1=(int(row['xmin']), int(row['ymin'])), pt2=(int(row['xmax']), int(row['ymax'])), color=(255, 0, 0), thickness=2)
 
 				if output_results:
-					
 					fig, ax = plt.subplots(figsize=(16, 12))
 					ax.imshow(detection_results.render()[0])
 					plt.savefig("Results/detection_output.png")
 					plt.close()
 
-
-
-			tracker_handler.update_trackers(frame)
+			if show_frame > 0:
+				show_frame -= 1
 
 		"""Semantic Segmentation"""
 		if run_semantic:
@@ -255,8 +263,9 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 		draw_str(frame, (100, 100), 'FPS: %.2f' % fps)
 
 		# Add Semantic Output to mask if its fully integrated
-		if (displaySemanticIntegrated):
-			frame[(semanticMask == 1)] = [0, 255, 255]
+		if run_semantic:
+			if displaySemanticIntegrated:
+				frame[(semanticMask == 1)] = [0, 255, 255]
 
 		cv2.imshow('Integration_Test', frame)
 
@@ -275,4 +284,4 @@ def run_model(output_results=False, run_detection=True, run_semantic=True):
 
 if __name__ == '__main__':
 	# Set output_results to true, to save files of detection/segmentation output
-	run_model(output_results=False, run_detection=True, run_semantic=True)
+	run_model(output_results=False, run_detection=True, run_semantic=False)

@@ -58,6 +58,7 @@ class MOT:
 					if IoU > IOU_THRESHOLD:
 						# Found a match, check if already found
 						if tracker in trackers_matched:
+							detections_to_remove.append(detection_bounding_box)
 							break
 
 						# Update tracker position to detected position, and add to set
@@ -65,6 +66,7 @@ class MOT:
 							tracker.update_filter(frame_gray, detection_bounding_box)
 						trackers_matched.add(tracker)
 						detections_to_remove.append(detection_bounding_box)
+						tracker.undetected = 0
 						break
 
 			# Remove detections with matches
@@ -72,10 +74,12 @@ class MOT:
 				if detection_to_remove in detection_bounding_boxes:
 					detection_bounding_boxes.remove(detection_to_remove)
 
-			# Remove trackers with no detection match
+			# Remove trackers with no detection match after 3 detections
 			for tracker in self.trackers:
 				if tracker not in trackers_matched:
-					self.trackers.remove(tracker)
+					tracker.undetected += 1
+					if tracker.undetected > 2:
+						self.trackers.remove(tracker)
 
 			# Create new trackers for those detections with no tracker match
 			for detection_bounding_box in detection_bounding_boxes:
